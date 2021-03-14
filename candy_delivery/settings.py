@@ -11,6 +11,23 @@ DEBUG = dynaconf.settings.DEBUG
 ALLOWED_HOSTS = dynaconf.settings.ALLOWED_HOSTS
 CORS_ALLOWED_ORIGINS = dynaconf.settings.CORS_ALLOWED_ORIGINS
 
+if DEBUG:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
+        },
+        'loggers': {
+            'django.db.backends': {
+                'level': 'DEBUG',
+                'handlers': ['console'],
+            }
+        },
+    }
+
 # Application definition
 
 INSTALLED_APPS = [

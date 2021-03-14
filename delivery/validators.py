@@ -15,5 +15,5 @@ def interval_validator(value):
 
 
 def weight_validator(value):
-    if not (0.01 <= value <= 50):
+    if not (0 < value <= 50):
         raise ValidationError('Недопустимый вес заказа')

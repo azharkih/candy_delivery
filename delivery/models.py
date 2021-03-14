@@ -35,7 +35,7 @@ class TimeInterval(models.Model):
         return begin, end
 
     def save(self, *args, **kwargs):
-        self.begin, self.end = TimeInterval.parse_name()
+        self.begin, self.end = TimeInterval.parse_name(self.name)
         super().save(*args, **kwargs)
 
 
@@ -49,6 +49,11 @@ class Courier(models.Model):
         FOOT = 'foot', _('Пеший')
         BIKE = 'bike', _('Велокурьер')
         CAR = 'car', _('Курьер на автомобиле')
+
+    courier_id = models.PositiveIntegerField(
+        primary_key=True,
+        verbose_name='Идентификатор курьера',
+    )
 
     courier_type = models.CharField(
         max_length=4,
@@ -69,25 +74,20 @@ class Courier(models.Model):
         db_index=True,
     )
 
-    class Meta:
-        ordering = ('courier_type', 'id',)
-
     def __str__(self) -> str:
-        return f'{self.courier_type} - {self.id}'
+        return f'{self.courier_type} - {self.courier_id}'
 
 
 class Order(models.Model):
     """    """
-    class OrderStatus(models.IntegerChoices):
-        """Класс CourierType используется для определения допустимых
-        типов курьеров."""
+    order_id = models.PositiveIntegerField(
+        primary_key=True,
+        verbose_name='Идентификатор заказа',
+    )
 
-        ACCEPTED = 0, _('Принят')
-        COURIER_ASSIGNED = 10, _('Назначен курьер')
-        COMPLETED = 20, _('Заказ доставлен')
-
-    weight = models.PositiveSmallIntegerField(
+    weight = models.DecimalField(
         validators=[weight_validator],
+        max_digits=4, decimal_places=2
     )
     region = models.ForeignKey(
         Region,
@@ -102,16 +102,30 @@ class Order(models.Model):
         verbose_name='Часы работы',
         db_index=True,
     )
+    complete_time = models.DateTimeField(
+        null=True,
+        verbose_name='Время завершения заказа',
+    )
+
+    def __str__(self) -> str:
+        return f'order_id: {self.order_id}'
+
+
+class Invoice(models.Model):
     courier = models.ForeignKey(
         Courier,
-        null=True,
-        related_name='orders',
+        related_name='invoices',
         verbose_name='Назначенный курьер',
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         db_index=True,
     )
-    status = models.PositiveSmallIntegerField(
-        choices=OrderStatus.choices,
-        verbose_name='Статус заказа',
-        default=OrderStatus.ACCEPTED
+    assigned_time = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name='Время выдачи курьеру',
+    )
+    orders = models.ManyToManyField(
+        Order,
+        related_name='invoices',
+        verbose_name='Заказы',
+        db_index=True,
     )
