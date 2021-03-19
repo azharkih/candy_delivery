@@ -13,29 +13,23 @@ class Region(models.Model):
 
 class TimeInterval(models.Model):
     name = models.CharField(
+        primary_key=True,
         verbose_name='Интервал(HH:MM-HH:MM)',
         max_length=11,
-        db_index=True,
         validators=[interval_validator]
     )
-    begin = models.PositiveSmallIntegerField(
-        verbose_name='Начало интервала'
+    begin = models.PositiveIntegerField(
+        verbose_name='Начало интервала в минутах'
     )
-    end = models.PositiveSmallIntegerField(
-        verbose_name='Конец интервала'
+    end = models.PositiveIntegerField(
+        verbose_name='Конец интервала в минутах'
     )
 
     def __str__(self):
         return self.name
 
-    @staticmethod
-    def parse_name(name):
-        begin = int(name[:2]) * 60 + int(name[3:5])
-        end = int(name[6:8]) * 60 + int(name[9:11])
-        return begin, end
-
     def save(self, *args, **kwargs):
-        self.begin, self.end = TimeInterval.parse_name(self.name)
+        self.begin, self.end = interval_validator(self.name)
         super().save(*args, **kwargs)
 
 
@@ -102,10 +96,7 @@ class Order(models.Model):
         verbose_name='Часы работы',
         db_index=True,
     )
-    complete_time = models.DateTimeField(
-        null=True,
-        verbose_name='Время завершения заказа',
-    )
+
 
     def __str__(self) -> str:
         return f'order_id: {self.order_id}'
@@ -119,13 +110,41 @@ class Invoice(models.Model):
         on_delete=models.CASCADE,
         db_index=True,
     )
-    assigned_time = models.DateTimeField(
+    assign_time = models.DateTimeField(
         auto_now_add=True,
         verbose_name='Время выдачи курьеру',
     )
     orders = models.ManyToManyField(
         Order,
+        through='InvoiceOrder',
         related_name='invoices',
         verbose_name='Заказы',
         db_index=True,
     )
+    expected_reward = models.PositiveIntegerField(
+        null=False,
+        verbose_name='Ожидаемое вознаграждение',
+    )
+
+
+class InvoiceOrder(models.Model):
+    invoice = models.ForeignKey(
+        Invoice,
+        related_name='invoice_orders',
+        on_delete=models.CASCADE,
+    )
+    order = models.ForeignKey(
+        Order,
+        related_name='invoice_orders',
+        on_delete=models.CASCADE
+    )
+    complete_time = models.DateTimeField(
+        null=True,
+        verbose_name='Время завершения заказа',
+    )
+    delivery_time = models.PositiveIntegerField(
+        null=True,
+        verbose_name='Время доставки в секундах',
+    )
+
+

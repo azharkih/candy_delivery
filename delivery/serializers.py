@@ -1,18 +1,48 @@
 from rest_framework import serializers
 
 from delivery import services
-from .models import Courier, Order, Region, TimeInterval
+from .models import Courier, Invoice, Order, Region
+from .services import delete_unavailable_orders
+from .utils import add_regions, add_time_intervals
+from .validators import check_unknown_fields, interval_list_validator
+
+
+class CourierRelationsSerializer(serializers.Serializer):
+    regions = serializers.ListSerializer(
+        child=serializers.IntegerField(min_value=1), required=False)
+    working_hours = serializers.ListSerializer(
+        child=serializers.CharField(max_length=11, min_length=11),
+        required=False)
+
+    def validate_working_hours(self, value):
+        return interval_list_validator(value)
+
+    def create(self, validated_data, **kwargs):
+        region_codes = validated_data.get('regions')
+        if region_codes:
+            add_regions(region_codes)
+        working_hours = validated_data.get('working_hours')
+        if working_hours:
+            add_time_intervals(working_hours)
+        return validated_data
+
+
+class OrderRelationsSerializer(serializers.Serializer):
+    region = serializers.IntegerField(min_value=1)
+    delivery_hours = serializers.ListSerializer(
+        child=serializers.CharField(max_length=11, min_length=11))
+
+    def validate_delivery_hours(self, value):
+        return interval_list_validator(value)
+
+    def create(self, validated_data, **kwargs):
+        Region.objects.get_or_create(code=validated_data['region'])
+        delivery_hours = validated_data.get('delivery_hours')
+        add_time_intervals(delivery_hours)
+        return validated_data
 
 
 class CourierSerializer(serializers.ModelSerializer):
-    regions = serializers.PrimaryKeyRelatedField(
-        queryset=Region.objects.all(),
-        many=True)
-    working_hours = serializers.SlugRelatedField(
-        queryset=TimeInterval.objects.all(),
-        many=True,
-        slug_field='name'
-    )
     rating = serializers.SerializerMethodField()
     earnings = serializers.SerializerMethodField()
 
@@ -21,6 +51,13 @@ class CourierSerializer(serializers.ModelSerializer):
         fields = ['courier_id', 'courier_type', 'regions', 'working_hours',
                   'rating', 'earnings', ]
 
+    def validate_courier_id(self, value):
+        if (self.context['request'].method == 'PATCH'
+            and self.initial_data.get('courier_id')):
+            raise serializers.ValidationError('Поле недоступно для изменения')
+        return value
+
+
     def get_rating(self, instance):
         return services.get_courier_rating(instance)
 
@@ -28,22 +65,14 @@ class CourierSerializer(serializers.ModelSerializer):
         return services.get_courier_earning(instance)
 
     def run_validation(self, data=serializers.empty):
-        if data is not serializers.empty:
-            unknown_fields = set(data) - set(self.fields)
-            if unknown_fields:
-                errors = [f for f in unknown_fields]
-                raise serializers.ValidationError({
-                    'unknown_fields': errors,
-                })
-            regions = data.get('regions')
-            if regions:
-                for code in regions:
-                    Region.objects.get_or_create(code=code)
-            working_hours = data.get('working_hours')
-            if working_hours:
-                for interval in working_hours:
-                    TimeInterval.objects.get_or_create(name=interval)
+        check_unknown_fields(self.fields, data)
         return super().run_validation(data)
+
+    def update(self, instance, validated_data):
+        courier = super().update(instance, validated_data)
+        delete_unavailable_orders(courier)
+        return courier
+
 
     def to_representation(self, instance):
         if self.context['request'].method == 'POST':
@@ -54,29 +83,12 @@ class CourierSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    delivery_hours = serializers.SlugRelatedField(
-        queryset=TimeInterval.objects.all(),
-        many=True,
-        slug_field='name'
-    )
-
     class Meta:
         model = Order
         fields = ['order_id', 'weight', 'region', 'delivery_hours', ]
 
     def run_validation(self, data=serializers.empty):
-        if data is not serializers.empty:
-            unknown_fields = set(data) - set(self.fields)
-            if unknown_fields:
-                raise serializers.ValidationError("dont send extra fields")
-            regions = data.get('regions')
-            if regions:
-                for code in regions:
-                    Region.objects.get_or_create(code=code)
-            delivery_hours = data.get('delivery_hours')
-            if delivery_hours:
-                for interval in delivery_hours:
-                    TimeInterval.objects.get_or_create(name=interval)
+        check_unknown_fields(self.fields, data)
         return super().run_validation(data)
 
     def to_representation(self, instance):
@@ -85,9 +97,3 @@ class OrderSerializer(serializers.ModelSerializer):
                 instance, dict) else instance.order_id
             return {'id': value_id}
         return super().to_representation(instance)
-
-
-class OrderRepr(serializers.ModelSerializer):
-    class Meta:
-        model = Order
-        fields = ['order_id']

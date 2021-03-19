@@ -1,12 +1,16 @@
+from django.db.models import F
 from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from delivery.models import Courier, Order
-from delivery.serializers import (CourierSerializer, OrderSerializer)
+from candy_delivery.settings import IS_NEW_REGIONS_AND_TIME_INTERVALS_AVAILABLE
 from delivery import services
-from delivery.utils import get_error_objects
+from delivery.models import Courier, InvoiceOrder, Order
+from delivery.serializers import (CourierRelationsSerializer,
+                                  CourierSerializer, OrderRelationsSerializer,
+                                  OrderSerializer)
+from delivery.utils import serialize_invoice
 
 
 class CourierViewSet(mixins.CreateModelMixin,
@@ -16,15 +20,29 @@ class CourierViewSet(mixins.CreateModelMixin,
     queryset = Courier.objects.all()
     serializer_class = CourierSerializer
 
+    def _add_new_regions_and_intervals(self, data):
+        # Если допускаются еще незарегистрированные регионы и интервалы времени
+        # перед созданием курьера добавим их в базу
+        if IS_NEW_REGIONS_AND_TIME_INTERVALS_AVAILABLE:
+            for item in data:
+                serializer_relations = CourierRelationsSerializer(data=item)
+                if serializer_relations.is_valid():
+                    serializer_relations.save()
+
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data['data'], many=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({'couriers': serializer.data},
-                            status=status.HTTP_201_CREATED)
-        invalid_objects = get_error_objects(serializer)
-        return Response({'validation_error': {'couriers': invalid_objects}},
-                        status=status.HTTP_400_BAD_REQUEST)
+        self._add_new_regions_and_intervals(request.data.get('data'))
+        serializer = self.get_serializer(
+            data=request.data.get('data'), many=True)
+
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({'couriers': serializer.data},
+                        status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        self._add_new_regions_and_intervals([request.data])
+
+        return super().update(request, *args, **kwargs)
 
 
 class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
@@ -32,15 +50,30 @@ class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
     serializer_class = OrderSerializer
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data['data'], many=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({'orders': serializer.data},
-                            status=status.HTTP_201_CREATED)
-        invalid_objects = get_error_objects(serializer)
-        return Response({'validation_error': {'orders': invalid_objects}},
-                        status=status.HTTP_400_BAD_REQUEST)
+        if IS_NEW_REGIONS_AND_TIME_INTERVALS_AVAILABLE:
+            for item in request.data.get('data'):
+                serializer_relations = OrderRelationsSerializer(data=item)
+                if serializer_relations.is_valid():
+                    serializer_relations.save()
 
+        serializer = self.get_serializer(
+            data=request.data.get('data'), many=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({'orders': serializer.data},
+                        status=status.HTTP_201_CREATED)
+
+    # @action(detail=False, methods=['post'])
+    # def assign(self, request):
+    #     try:
+    #         courier = Courier.objects.get(
+    #             courier_id=request.data['courier_id'])
+    #     except:
+    #         return Response({'error': 'Курьер не найден'},
+    #                         status=status.HTTP_400_BAD_REQUEST)
+    #     active_orders = services.get_active_orders(courier)
+    #     services.check_available_orders(courier)
+    #     return Response({'orders': active_orders}, status=status.HTTP_200_OK)
     @action(detail=False, methods=['post'])
     def assign(self, request):
         try:
@@ -49,20 +82,21 @@ class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
         except:
             return Response({'error': 'Курьер не найден'},
                             status=status.HTTP_400_BAD_REQUEST)
-        active_orders = services.get_active_orders(courier)
-        return Response({'orders': active_orders}, status=status.HTTP_200_OK)
+        active_invoice = services.get_active_invoice(courier)
+        context = serialize_invoice(active_invoice)
+        return Response(context, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def complete(self, request):
         try:
-            order = Order.objects.get(
+            invoiceorder = InvoiceOrder.objects.get(
                 order_id=request.data['order_id'],
-                invoices__courier__courier_id=request.data['courier_id'])
+                courier_id=request.data['courier_id'])
         except:
             return Response(
                 {'error': 'Заказ не найден или назначен другому курьеру'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        completed_order = services.complete_order(order)
+        completed_order = services.complete_order(invoiceorder)
         return Response({'order_id': completed_order},
                         status=status.HTTP_200_OK)

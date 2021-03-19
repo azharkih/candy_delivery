@@ -110,11 +110,18 @@ USE_L10N = True
 
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
+REST_FRAMEWORK = {
+    'EXCEPTION_HANDLER': 'delivery.utils.custom_exception_handler'
+}
 
+# Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 
 STATICFILES_DIRS = (os.path.join(BASE_DIR, 'static/'),)
+
+# Настройки бизнес-логики
+IS_NEW_REGIONS_AND_TIME_INTERVALS_AVAILABLE = (
+    dynaconf.settings.IS_NEW_REGIONS_AND_TIME_INTERVALS_AVAILABLE)
 
 settings = dynaconf.DjangoDynaconf(__name__)  # noqa
 # HERE ENDS DYNACONF EXTENSION LOAD (No more code below this line)
