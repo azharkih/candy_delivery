@@ -1,11 +1,15 @@
 # 'orders-complete'
 import json
 
+from dateutil.parser import parse
+from django.db.models import F, Sum
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from delivery.models import Courier, Order, TimeInterval
+from delivery.models import Courier, InvoiceOrder, Order, TimeInterval
+from delivery.services import complete_order
 from delivery.tests.test_fixtures import create_test_case_full
 
 
@@ -180,25 +184,112 @@ class OrdersTests(APITestCase):
 
     def test_valid_data_assign_orders(self):
         url = reverse('orders-assign')
-        data = {'courier_id': 100}
-        response = self.client.post(url, data, format='json')
-        # Проверяем корректность ответа
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        content = json.loads(response.content)
+        courier_100 = Courier.objects.get(courier_id=100)
+        courier_101 = Courier.objects.get(courier_id=101)
+        courier_102 = Courier.objects.get(courier_id=102)
+        courier_103 = Courier.objects.get(courier_id=103)
+        response = {}
+        for courier_id in range(100, 104):
+            data = {'courier_id': courier_id}
+            response[courier_id] = self.client.post(url, data, format='json')
+            self.assertEqual(response[courier_id].status_code,
+                             status.HTTP_200_OK)
+        courier_100_orders = Order.objects.filter(
+            invoices__courier=courier_100)
+        courier_101_orders = Order.objects.filter(
+            invoices__courier=courier_101)
+        courier_102_orders = Order.objects.filter(
+            invoices__courier=courier_102)
+        courier_103_orders = Order.objects.filter(
+            invoices__courier=courier_103)
+
         # Проверяем структуру ответа.
-        # Проверяем, что заказы назначены на максимально возможную сумму.
-        # Проверяем идемпотентность.
-        # Проверяем, что другому курьеру не назначены заказы первого.
-        # Проверяем, что доставленные заказы текущего развоза исключаются,
-        # а время остается тоже.
+        content_100 = json.loads(response[100].content)
+        content_103 = json.loads(response[103].content)
+        self.assertTrue(
+            len(content_100) == 2,
+            'Ответ при назначении заказа должен содержать 2 поля')
+        self.assertListEqual(
+            content_100.get('orders'),
+            list(courier_100_orders.values(id=F('order_id'))),
+            'Поле c заказами должно содержать список назначенных заказов')
+        time_delta_order_assign = (
+            timezone.now() -
+            parse(content_100.get('assign_time'))).total_seconds()
+        self.assertTrue(
+            time_delta_order_assign < 1,
+            'Разница между текущим временем и временем принятия заказа в '
+            'ответе не должна превышать 1 секунды')
+
         # Проверяем, что если для курьера нет доступных заказов - возвращается
         # пустой список, время не возвращается.
+        self.assertTrue(
+            len(content_103) == 1,
+            'Ответ при отсутствии доступных заказов должен содержать 1 поле')
+        self.assertListEqual(
+            content_103.get('orders'), [],
+            'При отсутствии доступных заказов в ответ должен передаваться '
+            'пустой список')
 
-    # self.assertEqual(1, 2, 'Тест не написан')
+        # Проверяем, что заказы назначены c максимально возможным весом.
+        # По тест-кейсу веса должны быть равны: 14.18 11 45.5 None
+        courier_100_sum_orders = float(courier_100_orders.aggregate(
+            sum=Sum('weight'))['sum'])
+        courier_101_sum_orders = float(courier_101_orders.aggregate(
+            sum=Sum('weight'))['sum'])
+        courier_102_sum_orders = float(courier_102_orders.aggregate(
+            sum=Sum('weight'))['sum'])
+        courier_103_sum_orders = courier_103_orders.aggregate(
+            sum=Sum('weight'))['sum']
+        self.assertEqual(courier_100_sum_orders, 14.18,
+                         'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(courier_101_sum_orders, 11,
+                         'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(courier_102_sum_orders, 45.5,
+                         'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(courier_103_sum_orders, None,
+                         'Проверьте, что заказы назначаются корректно')
 
-# def test_assign_orders_that_will_fail(self):
-#     self.assertEqual(1, 2, 'Тест не написан')
-#
+        # Проверяем идемпотентность.
+        data = {'courier_id': 100}
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(content_100, json.loads(response.content),
+                         'Проверьте, что обработчик идемпотентен.')
+
+        # Проверяем, что другому курьеру не назначены заказы первого.
+        self.assertFalse(courier_101_orders in courier_100_orders,
+                         'Проверьте, что заказы выданные первому курьеру не '
+                         'назначены второму')
+
+        # Проверяем, что доставленные заказы текущего развоза исключаются,
+        # а время остается тоже.
+        order_for_complete = courier_100_orders.all()[0]
+        invoice_order = InvoiceOrder.objects.get(order=order_for_complete)
+        complete_time = timezone.now()
+        complete_order(invoice_order, complete_time)
+        data = {'courier_id': 100}
+        response = self.client.post(url, data, format='json')
+        content = json.loads(response.content)
+        print(content.get('orders'))
+        print({'id': order_for_complete.order_id})
+
+        self.assertFalse(
+            {'id': order_for_complete.order_id} in content.get('orders'),
+            'Проверьте, что доставленные заказы исключаются из ответа.')
+        self.assertEqual(
+            content.get('assign_time', 0), content_100.get('assign_time', 1),
+            'Проверьте, что при возврате недоставленных заказов время развоза'
+            ' неизменно.')
+
+
+def test_assign_orders_that_will_fail(self):
+    url = reverse('orders-list')
+    wrong_data = {'courier_id': 999}
+    response = self.client.post(url, wrong_data, format='json')
+
+    # Проверяем корректность ответа
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
 # def test_complete_order_that_will_pass(self):
 #     self.assertEqual(1, 2, 'Тест не написан')
 #

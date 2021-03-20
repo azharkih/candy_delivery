@@ -1,5 +1,6 @@
 from django.db.models import QuerySet
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -32,7 +33,8 @@ class SmokeTests(APITestCase):
         Invoice.objects.create(courier=courier, expected_reward =0).orders.set([order])
         data_assign = {'courier_id': courier.courier_id}
         data_complete = {'courier_id': courier.courier_id,
-                         'order_id': order.order_id}
+                         'order_id': order.order_id,
+                         'complete_time': timezone.now()}
 
         cls.testcase = list()
         cls.testcase.append(cls.TestEndPoint(

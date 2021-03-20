@@ -1,3 +1,4 @@
+from dateutil.parser import parse
 from django.db.models import F
 from rest_framework import mixins, status
 from rest_framework.decorators import action
@@ -63,17 +64,6 @@ class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
         return Response({'orders': serializer.data},
                         status=status.HTTP_201_CREATED)
 
-    # @action(detail=False, methods=['post'])
-    # def assign(self, request):
-    #     try:
-    #         courier = Courier.objects.get(
-    #             courier_id=request.data['courier_id'])
-    #     except:
-    #         return Response({'error': 'Курьер не найден'},
-    #                         status=status.HTTP_400_BAD_REQUEST)
-    #     active_orders = services.get_active_orders(courier)
-    #     services.check_available_orders(courier)
-    #     return Response({'orders': active_orders}, status=status.HTTP_200_OK)
     @action(detail=False, methods=['post'])
     def assign(self, request):
         try:
@@ -91,12 +81,18 @@ class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
         try:
             invoiceorder = InvoiceOrder.objects.get(
                 order_id=request.data['order_id'],
-                courier_id=request.data['courier_id'])
+                invoice__courier_id=request.data['courier_id'])
         except:
             return Response(
                 {'error': 'Заказ не найден или назначен другому курьеру'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        completed_order = services.complete_order(invoiceorder)
+        complete_time = parse(request.data.get('complete_time'))
+        if not complete_time:
+            return Response(
+                {'error': 'Не передано время доставки'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        completed_order = services.complete_order(invoiceorder, complete_time)
         return Response({'order_id': completed_order},
                         status=status.HTTP_200_OK)

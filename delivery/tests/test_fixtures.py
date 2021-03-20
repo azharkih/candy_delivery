@@ -31,6 +31,14 @@ def create_test_case_full():
     other_courier = Courier.objects.create(courier_id=101, courier_type='bike')
     other_courier.regions.add(*courier_regions)
     other_courier.working_hours.add(*working_hours)
+    other_courier_2 = Courier.objects.create(courier_id=102,
+                                             courier_type='car')
+    other_courier_2.regions.add(*courier_regions)
+    other_courier_2.working_hours.add(*working_hours)
+    other_courier_3 = Courier.objects.create(courier_id=103,
+                                             courier_type='car')
+    other_courier_3.regions.add(*courier_regions)
+    other_courier_3.working_hours.add(*working_hours)
 
     order_id = 100
 

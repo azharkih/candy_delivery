@@ -45,7 +45,9 @@ def serialize_invoice(active_invoice):
     context = {'orders': []}
     if active_invoice:
         context['orders'] = Order.objects.filter(
-            invoices=active_invoice).values(id=F('order_id'))
+            invoices=active_invoice,
+            invoice_orders__complete_time__isnull=True
+        ).values(id=F('order_id'))
         context['assign_time'] = active_invoice.assign_time
     return context
 

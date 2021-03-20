@@ -1,4 +1,5 @@
-from django.db.models import Avg, F, Min, Q, Sum
+from dateutil.parser import parse
+from django.db.models import Avg, Max, Min, Q, Sum
 from django.utils import timezone
 
 from delivery.models import Courier, Invoice, InvoiceOrder, Order
@@ -100,6 +101,7 @@ def get_assign_not_available_orders(courier):
     unavailable_orders = invoice_orders.exclude(order__in=orders)
     return unavailable_orders
 
+
 def delete_unavailable_orders(courier):
     unavailable_orders = get_assign_not_available_orders(courier)
     if unavailable_orders:
@@ -115,7 +117,7 @@ def assign_orders(courier):
     if not available_orders:
         return []
     delivery_orders = get_orders_for_delivery(
-            available_orders, COURIER_LOAD_CAPACITY[courier.courier_type])
+        available_orders, COURIER_LOAD_CAPACITY[courier.courier_type])
     expected_reward = PAY_RATE * PAY_COEFFICIENTS[courier.courier_type]
     invoice = Invoice.objects.create(courier=courier,
                                      expected_reward=expected_reward)
@@ -124,39 +126,30 @@ def assign_orders(courier):
 
 
 def get_active_invoice(courier):
-    """Если развоз не завершен - вернуть все заказы по накладной, иначе
-    назначить новые и вернуть их список.
+    """Если развоз не завершен - вернуть недоставленные заказы по накладной,
+    иначе назначить новые и вернуть их список.
 
     Заметки: возврат неисполненных заказов обеспечивает идемпотентность вызова.
     """
     active_invoice = Invoice.objects.filter(
-        courier=courier, orders__invoice_orders__complete_time__isnull=True)
+        courier=courier, invoice_orders__complete_time__isnull=True)
     if active_invoice:
         return active_invoice[0]
     return assign_orders(courier)
 
 
-def complete_order(invoice_order):
+def complete_order(invoice_order, complete_time):
     """Проставить время завершения, если заказ активный и вернуть id заказа."""
-
     if not invoice_order.complete_time:
-        invoice_order.complete_time = timezone.now()
-        #
-        # !!! ДОБАВИТЬ РАСЧЕТ ВРЕМЕНИ ДОСТАВКИ
-        # invoice_order.delivery_time: int = 0
-        # delta = Epoch(F('invoice_orders__complete_time') - F('invoice_orders__start_time'))
-        # min_average_duration = (Order.objects
-        #                         .filter(
-        #     invoice_order__complete_time__isnull=False,
-        #     invoices__courier=courier)
-        #                         .values('region_id')
-        #                         .annotate(td=Avg(delta))
-        #                         .aggregate(time=Min('td'))
-        #                         )['time']
-        # if min_average_duration:
-        #     return round((3600 - min(min_average_duration, 3600)) / 3600 * 5,
-        #                  2)
-        # return null
+        last_delivery_time = InvoiceOrder.objects.filter(
+            invoice_id=invoice_order.invoice_id
+        ).aggregate(time=Max('complete_time'))['time']
+        if not last_delivery_time:
+            last_delivery_time = invoice_order.invoice.assign_time
+        delivery_time = (complete_time - last_delivery_time
+                         ).total_seconds()
+        invoice_order.complete_time = complete_time
+        invoice_order.delivery_time = delivery_time
         invoice_order.save()
     return invoice_order.order_id
 
@@ -172,8 +165,8 @@ def get_courier_rating(courier):
                             )['time']
     if min_average_duration:
         return round((3600 - min(min_average_duration, 3600)) / 3600 * 5, 2)
-    return 5
+    return -1
 
 
 def get_courier_earning(courier):
-    return courier.invoices.aggregate(Sum('expected_reward'))
+    return courier.invoices.aggregate(sum=Sum('expected_reward'))['sum']
