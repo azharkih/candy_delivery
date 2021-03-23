@@ -1,6 +1,5 @@
-from dateutil.parser import parse
 from django.db.models import Avg, Max, Min, Q, Sum
-from django.utils import timezone
+from django.db.models.functions import Coalesce
 
 from delivery.models import Courier, Invoice, InvoiceOrder, Order
 
@@ -155,18 +154,25 @@ def complete_order(invoice_order, complete_time):
 
 
 def get_courier_rating(courier):
-    min_average_duration = (Order.objects
-                            .filter(
-        invoice_orders__delivery_time__isnull=False,
-        invoices__courier=courier)
-                            .values('region_id')
-                            .annotate(td=Avg('invoice_orders__delivery_time'))
-                            .aggregate(time=Min('td'))
-                            )['time']
-    if min_average_duration:
-        return round((3600 - min(min_average_duration, 3600)) / 3600 * 5, 2)
-    return -1
+    is_complete_deliveries = Courier.objects.filter(
+        invoices__invoice_orders__complete_time__isnull=False).exists()
+    if not is_complete_deliveries:
+        return None
+    min_average_duration = (
+        Order.objects
+        .filter(invoice_orders__delivery_time__isnull=False,
+                invoices__courier=courier)
+        .values('region_id')
+        .annotate(td=Avg('invoice_orders__delivery_time'))
+        .aggregate(time=Min('td')))['time']
+    return round((3600 - min(min_average_duration, 3600)) / 3600 * 5, 2)
 
 
 def get_courier_earning(courier):
-    return courier.invoices.aggregate(sum=Sum('expected_reward'))['sum']
+    return (
+        Invoice.objects
+        .filter(courier=courier)
+        .exclude(invoice_orders__complete_time__isnull=True)
+        .distinct()
+        .aggregate(sum=Coalesce(Sum('expected_reward'), 0))['sum']
+    )

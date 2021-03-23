@@ -75,11 +75,16 @@ class CourierSerializer(serializers.ModelSerializer):
 
 
     def to_representation(self, instance):
+        # При post-запросе возвращаем только идентификаторы заказов
         if self.context['request'].method == 'POST':
             value_id = instance.get('courier_id') if isinstance(
                 instance, dict) else instance.courier_id
             return {'id': value_id}
-        return super().to_representation(instance)
+        # Если доставок у курьера не было, поле с рейтингом исключаем из ответа
+        result = super().to_representation(instance)
+        if result.get('rating') is None:
+            result.pop('rating')
+        return result
 
 
 class OrderSerializer(serializers.ModelSerializer):

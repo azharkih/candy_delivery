@@ -1,15 +1,15 @@
-# 'orders-complete'
 import json
+from datetime import timedelta
 
 from dateutil.parser import parse
-from django.db.models import F, Sum
+from django.db.models import F, Q, Sum
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from delivery.models import Courier, InvoiceOrder, Order, TimeInterval
-from delivery.services import complete_order
+from delivery.services import complete_order, get_active_invoice
 from delivery.tests.test_fixtures import create_test_case_full
 
 
@@ -269,10 +269,8 @@ class OrdersTests(APITestCase):
         complete_order(invoice_order, complete_time)
         data = {'courier_id': 100}
         response = self.client.post(url, data, format='json')
-        content = json.loads(response.content)
-        print(content.get('orders'))
-        print({'id': order_for_complete.order_id})
 
+        content = json.loads(response.content)
         self.assertFalse(
             {'id': order_for_complete.order_id} in content.get('orders'),
             'Проверьте, что доставленные заказы исключаются из ответа.')
@@ -281,17 +279,94 @@ class OrdersTests(APITestCase):
             'Проверьте, что при возврате недоставленных заказов время развоза'
             ' неизменно.')
 
+    def test_not_valid_data_assign_orders(self):
+        url = reverse('orders-assign')
+        wrong_data = {'courier_id': 999}
+        response = self.client.post(url, wrong_data, format='json')
 
-def test_assign_orders_that_will_fail(self):
-    url = reverse('orders-list')
-    wrong_data = {'courier_id': 999}
-    response = self.client.post(url, wrong_data, format='json')
+        # Проверяем корректность ответа
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    # Проверяем корректность ответа
-    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    def test_valid_data_complete_order(self):
+        url = reverse('orders-complete')
+        courier = Courier.objects.first()
+        get_active_invoice(courier)
+        order_1 = Order.objects.filter(
+            invoice_orders__complete_time__isnull=True,
+            invoices__courier=courier).first()
+        complete_time_1 = timezone.now() + timedelta(minutes=11)
+        complete_time_2 = complete_time_1 + timedelta(minutes=9)
 
-# def test_complete_order_that_will_pass(self):
-#     self.assertEqual(1, 2, 'Тест не написан')
-#
-# def test_complete_order_that_will_fail(self):
-#     self.assertEqual(1, 2, 'Тест не написан')
+        data = {'courier_id': courier.courier_id,
+                'order_id': order_1.order_id,
+                'complete_time': complete_time_1
+                }
+        # Проверяем корректность и структуру ответа.
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+
+        self.assertEqual(
+            content.get('order_id'), order_1.order_id,
+            'Проверьте, что ответ содержит идентификатор завершенного заказа.')
+
+        # Проверяем идемпотентность обработчика
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            content, json.loads(response.content),
+            'Проверьте, что обработчик идемпотентен.')
+
+        # Проверяем, что у заказа проставилось время завершения и посчиталось
+        # время доставки в секундах.
+        invoice_order_1 = InvoiceOrder.objects.get(order=order_1)
+        self.assertEqual(
+            invoice_order_1.complete_time, complete_time_1,
+            'Проверьте, что в базе сохраняется время доставки.')
+
+        self.assertEqual(
+            invoice_order_1.delivery_time, 660,
+            'Проверьте, что время доставки первого заказа из развоза считается'
+            ' корректно.')
+
+        # Завершаем следующий заказ и проверяем что время доставки считается
+        # с момента доставки предыдущего заказа
+
+        invoice_order_2 = InvoiceOrder.objects.filter(
+            ~Q(order=order_1)).first()
+        complete_order(invoice_order_2, complete_time_2)
+
+        self.assertEqual(
+            invoice_order_2.delivery_time, 540,
+            'Проверьте, что время доставки второго заказа из развоза считается'
+            ' корректно.')
+
+    def test_not_valid_data_complete_order(self):
+        url = reverse('orders-complete')
+        courier_1 = Courier.objects.first()
+        courier_2 = Courier.objects.last()
+        invoice_2 = get_active_invoice(courier_2)
+
+        # В случае если заказ не найден возвращается ошибка 400
+        data = {'courier_id': courier_1.courier_id,
+                'order_id': 9999,
+                'complete_time': timezone.now()
+                }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        # В случае если заказ назначен на другого курьера возвращается
+        # ошибка 400
+        data = {'courier_id': courier_1.courier_id,
+                'order_id': invoice_2.orders.first().order_id,
+                'complete_time': timezone.now()
+                }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        # В случае если заказ не назначен возвращается ошибка 400
+        data = {'courier_id': courier_1.courier_id,
+                'order_id': Order.objects.filter(
+                    invoices__isnull=True).first().order_id,
+                'complete_time': timezone.now()
+                }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

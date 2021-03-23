@@ -28,7 +28,7 @@ paths:
                                 additionalProperties: false
                                 properties:
                                     validation_error:
-                                        $ref: '#/components/schemas/CouriersIds'
+                                        $ref: '#/components/schemas/CouriersIdsAP'
                                 required:
                                   - validation_error
 
@@ -94,7 +94,7 @@ paths:
                                 additionalProperties: false
                                 properties:
                                     validation_error:
-                                        $ref: '#/components/schemas/OrdersIds'
+                                        $ref: '#/components/schemas/OrdersIdsAP'
                                 required:
                                   - validation_error
 
@@ -112,7 +112,9 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/OrdersIds'
+                                allOf:
+                                  - $ref: '#/components/schemas/OrdersIds'
+                                  - $ref: '#/components/schemas/AssignTime'
                 '400':
                     description: 'Bad request'
 
@@ -190,6 +192,23 @@ components:
             required:
               - couriers
 
+        CouriersIdsAP:
+            type: object
+            additionalProperties: true
+            properties:
+                couriers:
+                    type: array
+                    items:
+                        type: object
+                        additionalProperties: true
+                        properties:
+                            id:
+                                type: integer
+                        required:
+                          - id
+            required:
+              - couriers
+
         CourierGetResponse:
             type: object
             additionalProperties: false
@@ -219,7 +238,6 @@ components:
               - courier_type
               - regions
               - working_hours
-              - rating
               - earnings
 
         CourierUpdateRequest:
@@ -242,6 +260,17 @@ components:
                         type: string
 
         OrdersPostRequest:
+            type: object
+            additionalProperties: false
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/OrderItem'
+            required:
+              - data
+
+        OrderItem:
             type: object
             additionalProperties: false
             properties:
@@ -278,6 +307,31 @@ components:
             required:
               - orders
 
+        OrdersIdsAP:
+            type: object
+            additionalProperties: true
+            properties:
+                orders:
+                    type: array
+                    items:
+                        type: object
+                        additionalProperties: true
+                        properties:
+                            id:
+                                type: integer
+                        required:
+                          - id
+            required:
+              - orders
+
+        AssignTime:
+            type: object
+            additionalProperties: false
+            properties:
+                assign_time:
+                    type: string
+                    example: '2021-01-10T09:32:14.42Z'
+
         OrdersAssignPostRequest:
             type: object
             additionalProperties: false
@@ -295,9 +349,13 @@ components:
                     type: integer
                 order_id:
                     type: integer
+                complete_time:
+                    type: string
+                    example: '2021-01-10T10:33:01.42Z'
             required:
               - courier_id
               - order_id
+              - complete_time
 
         OrdersCompletePostResponse:
             type: object

@@ -87,12 +87,13 @@ class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
                 {'error': 'Заказ не найден или назначен другому курьеру'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        complete_time = parse(request.data.get('complete_time'))
+        complete_time = request.data.get('complete_time')
         if not complete_time:
             return Response(
                 {'error': 'Не передано время доставки'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        complete_time = parse(complete_time)
         completed_order = services.complete_order(invoiceorder, complete_time)
         return Response({'order_id': completed_order},
                         status=status.HTTP_200_OK)

@@ -1,13 +1,17 @@
 import json
+import random
+from datetime import timedelta
 
 from django.db.models import Sum
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from delivery.models import Courier, Order, Region, \
+from delivery.models import Courier, Invoice, InvoiceOrder, Order, Region, \
     TimeInterval
-from delivery.services import COURIER_LOAD_CAPACITY, assign_orders
+from delivery.services import COURIER_LOAD_CAPACITY, PAY_COEFFICIENTS, \
+    assign_orders, \
+    complete_order
 from delivery.tests.test_fixtures import create_test_case_full
 
 
@@ -233,15 +237,15 @@ class CourierTests(APITestCase):
             sum_weight=Sum('weight'))['sum_weight']
         self.assertTrue(
             total_weight_orders <= COURIER_LOAD_CAPACITY[
-            patched_courier.courier_type],
+                patched_courier.courier_type],
             'Проверьте, что при patch запросе c изменением типа курьера '
             'снимаются заказы превышающие его актуальную грузоподъемность')
         excess_orders = patched_courier_orders.exclude(
             region__in=patched_courier.regions.all()).exclude(
             delivery_hours__in=patched_courier.working_hours.all())
         self.assertFalse(excess_orders.exists(),
-            'Проверьте, что при patch запросе c изменением регионов и времен '
-            'снимаются заказы которые курьер не сможет доставить')
+                         'Проверьте, что при patch запросе c изменением регионов и времен '
+                         'снимаются заказы которые курьер не сможет доставить')
 
     def test_not_valid_data_patch_courier(self):
         courier = Courier.objects.first()
@@ -283,8 +287,73 @@ class CourierTests(APITestCase):
             'Проверьте, что проверяется что интервалы имеют соответствующую '
             'структуру')
 
-    # def test_get_courier_that_will_pass(self):
-    #     self.assertEqual(1, 2, 'Тест не написан')
-    #
-    # def test_get_courier_that_will_fail(self):
-    #     self.assertEqual(1, 2, 'Тест не написан')
+    def test_get_courier(self):
+        courier = Courier.objects.get(courier_id=100)
+        url = reverse('couriers-detail', kwargs={'pk': courier.courier_id})
+
+        active_invoice = assign_orders(courier)
+        active_invoice_positions = InvoiceOrder.objects.filter(
+            invoice=active_invoice)
+        complete_time = active_invoice.assign_time
+
+        fields_for_newbie = ['courier_id', 'courier_type', 'regions',
+                             'working_hours', 'earnings']
+
+        response = self.client.get(url)
+        # Проверяем корректность ответа
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Проверка структуры ответа для курьера не совершившего ни одной
+        # доставки
+        content = json.loads(response.content)
+        self.assertTrue(
+            len(content) == len(fields_for_newbie),
+            'Ответ на запрос для курьера не доставившего ни одного заказа '
+            f'должен содержать следующие поля: {fields_for_newbie}')
+        for field in fields_for_newbie:
+            self.assertTrue(
+                field in content,
+                f'Ответ на запрос для курьера не доставившего ни одного заказа'
+                f' должен содержать поле {field}')
+
+        # Проверка расчета рейтинга.
+        # Заработок должен увеличиться только по завершению развоза.
+        # При смене типа курьера сумма заработка за развоз должна остаться
+        # неизменной
+        earning = PAY_COEFFICIENTS[courier.courier_type] * 500
+        courier.courier_type = 'car'
+        courier.save()
+        results = {}
+        count_orders = len(active_invoice_positions)
+        for invoice_position in active_invoice_positions:
+            region = invoice_position.order.region_id
+            results.setdefault(region, [])
+
+            delivery_time = random.randint(100, 500)
+            complete_time += timedelta(seconds=delivery_time)
+            complete_order(invoice_position, complete_time)
+            results[region].append(delivery_time)
+
+            average_time_delivery = {}
+            for key, value in results.items():
+                avg_td = sum(value) / len(value)
+                average_time_delivery[key] = avg_td
+
+            t = min(average_time_delivery.values())
+            rating = round(((60 * 60 - min(t, 60 * 60)) / (60 * 60) * 5), 2)
+
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            content = json.loads(response.content)
+            self.assertEqual(content['rating'], rating,
+                             'Рейтинг считается неверно')
+            count_orders -= 1
+            if count_orders == 0:
+                self.assertEqual(content['earnings'], earning,
+                                 'Заработок считается неверно')
+            else:
+                self.assertEqual(
+                    content['earnings'], 0,
+                    'Заработок должен прибавляться только по завершенным '
+                    'развозам')
+
+
