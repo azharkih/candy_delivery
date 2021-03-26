@@ -1,7 +1,7 @@
 ![Сandy delivery](https://wmpics.pics/di-IJP4.png)
 # Сandy delivery
 
-###### интернет-магазин по доставке конфет "Сласти от всех напастей"
+##### интернет-магазин по доставке конфет "Сласти от всех напастей"
 
 ### Зависимости
 * Python (3.6)
@@ -63,7 +63,9 @@ postgres=# ALTER ROLE candy_user SET client_encoding TO 'utf8';
 postgres=# ALTER ROLE candy_user SET default_transaction_isolation TO 'read committed';
 postgres=# ALTER ROLE candy_user SET timezone TO 'UTC';
 postgres=# GRANT ALL PRIVILEGES ON DATABASE candy_delivery TO candy_user;
+postgres=# ALTER USER candy_user CREATEDB;
 postgres=# \q
+
 ```
 ##### Установка проекта
 Настроим права на каталог /var/www
@@ -111,6 +113,11 @@ product:
 режим работы сервиса `product`: 
 ```
 ENV_FOR_DYNACONF = product
+```
+Перед запуском собираем статические файлы и выполняем миграцию БД:
+```
+python3 manage.py collectstatic
+python3 manage.py migrate 
 ```
 ##### Запуск сервиса
 Для запуска сервиса в каталоге проекта выполняем команду:
@@ -195,6 +202,105 @@ python3 manage.py test
     * Если заказ не найден возвращается ошибка 400
     * Если заказ назначен на другого курьера возвращается ошибка 400
     * Если заказ не назначен возвращается ошибка 400
-  
 
+### Настройка gunicorn
+Проверяем работу Gunicorn:
+```
+gunicorn --bind 0.0.0.0:8080 candy_delivery.wsgi
+```
+Откроем для настройки
+```
+sudo nano /etc/systemd/system/gunicorn.socket
+```
+Пропишем в файле несколько настроек:
+```
+[Unit]
+Description=gunicorn socket
 
+[Socket]
+ListenStream=/run/gunicorn.sock
+
+[Install]
+WantedBy=sockets.target
+```
+Откроем служебный файл systemd для настройки работы сервиса:
+```
+sudo nano /etc/systemd/system/gunicorn.service
+```
+```
+[Unit]
+Description=gunicorn daemon
+Requires=gunicorn.socket
+After=network.target
+
+[Service]
+User=entrant
+Group=www-data
+WorkingDirectory=/var/www/candy_delivery
+ExecStart=/var/www/candy_delivery/env/bin/gunicorn \
+          --access-logfile - \
+          --workers 5 \
+          --bind unix:/run/gunicorn.sock \
+          candy_delivery.wsgi:application
+
+[Install]
+WantedBy=multi-user.target
+```
+Запускаем и активируем сокет Gunicorn
+```
+sudo systemctl start gunicorn.socket
+sudo systemctl enable gunicorn.socket
+```
+Тестируем:
+```
+sudo systemctl status gunicorn.socket
+file /run/gunicorn.sock
+```
+Установим соединение с сокетом через curl.
+```
+curl --unix-socket /run/gunicorn.sock localhost
+```
+Перезапускаем процессы Gunicorn
+```
+sudo systemctl daemon-reload
+sudo systemctl restart gunicorn
+```
+
+### Настройка NGINX
+Откроем для настройки
+```
+sudo nano /etc/nginx/sites-available/candy_delivery
+```
+```
+server {
+    listen 80;
+    server_name 130.193.56.231;
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location /static/ {
+        alias /var/www/candy_delivery/static/;
+    }
+
+    location /media/ {
+        alias /var/www/candy_delivery/media/;
+    }
+
+    location / {
+        include proxy_params;
+        proxy_pass http://unix:/run/gunicorn.sock;
+    }
+}
+```
+Теперь мы можем активировать файл, привязав его к каталогу sites-enabled:
+```
+sudo ln -s /etc/nginx/sites-available/candy_delivery /etc/nginx/sites-enabled
+```
+Протестируем:
+```
+sudo nginx -t
+```
+Если ошибок нет, то перезапускаем сервер и даём брандмауэру необходимые права:
+```
+sudo systemctl restart nginx
+sudo ufw allow 'Nginx Full'
+```

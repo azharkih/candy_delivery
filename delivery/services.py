@@ -115,7 +115,7 @@ def get_assign_not_available_orders(courier):
 
 
 def delete_unavailable_orders(courier):
-    """Исключить из развоза заказы, которые он не сможет доставить."""
+    """Исключить из развоза заказы, которые курьер не сможет доставить."""
 
     unavailable_orders = get_assign_not_available_orders(courier)
     if unavailable_orders:

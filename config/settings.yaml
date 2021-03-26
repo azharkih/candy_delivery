@@ -17,9 +17,5 @@ product:
   DEBUG: false
   ALLOWED_HOSTS:
     - 130.193.56.231
-    - 0.0.0.0
-    - testserver
-  CORS_ALLOWED_ORIGINS:
-    - 127.0.0.1
     - localhost
     - testserver

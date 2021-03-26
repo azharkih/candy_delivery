@@ -112,4 +112,4 @@ class SmokeTests(APITestCase):
                         status.HTTP_405_METHOD_NOT_ALLOWED,
                         f'Для "{url}" запрос с методом {method} должен быть '
                         f'недоступен')
-                    print(f'- {method:10} {url:40} forbidden -- ОК')
+                    print(f'- {method:10} {url:40} forbidden -- OK')
