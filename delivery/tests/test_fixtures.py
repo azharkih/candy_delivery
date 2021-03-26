@@ -1,15 +1,6 @@
 from delivery.models import Courier, Order, Region, TimeInterval
 
 
-#
-# def create_test_case():
-#     region_1 = Region.objects.create(code=123)
-#     working_hours_1 = TimeInterval.objects.create(name='09:00-18:00')
-#     courier_1 = Courier.objects.create(courier_id=1, courier_type='foot')
-#     courier_1.regions.set([region_1])
-#     courier_1.working_hours.set([working_hours_1])
-#     return {'courier_1': courier_1}
-
 def create_test_case_full():
     working_hours = ['11:35-14:05', '09:00-11:00']
     courier_regions = [100, 101, 102]
@@ -54,4 +45,3 @@ def create_test_case_full():
             order_id=order_id, weight=weight,
             region_id=courier_regions[0]).delivery_hours.add(working_hours[0])
         order_id += 1
-

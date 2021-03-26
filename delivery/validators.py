@@ -5,16 +5,19 @@ from rest_framework import serializers
 
 
 def hh_mm_to_minutes(str_hh_mm):
+    """Перевести строку формата 'HH:MM' во время."""
     minutes = time.strptime(str_hh_mm, '%H:%M')
     return minutes.tm_hour * 60 + minutes.tm_min
 
 
 def interval_validator(value):
+    """Проверить является ли строка интервалом времени в формате 'HH:MM-HH:MM'
+    и вернуть времена начала и конца периода."""
     try:
         value = value.split('-')
         begin = hh_mm_to_minutes(value[0])
         end = hh_mm_to_minutes(value[1])
-    except:
+    except ValueError:
         raise serializers.ValidationError(
             'Значение не является интервалом времени в формате "HH:MM-HH:MM"'
         )
@@ -22,6 +25,9 @@ def interval_validator(value):
 
 
 def interval_list_validator(interval_list):
+    """Проверить список интервалов и вернуть список кортежей с валидным
+    интервалом и временами начала и конца интервала."""
+
     new_list = []
     for interval in interval_list:
         begin, end = interval_validator(interval)
@@ -30,11 +36,16 @@ def interval_list_validator(interval_list):
 
 
 def weight_validator(value):
+    """Проверить, что вес соответствует нормам сервиса."""
+
     if not (0 < value <= 50):
         raise ValidationError('Недопустимый вес заказа')
 
 
 def check_unknown_fields(fields, data):
+    """Проверить, что в сериализуемый контент не содержит необъявленных
+    полей."""
+
     if data is not serializers.empty:
         unknown_fields = set(data) - set(fields)
         if unknown_fields:
@@ -42,14 +53,3 @@ def check_unknown_fields(fields, data):
             raise serializers.ValidationError({
                 'unknown_fields': errors,
             })
-
-def region_code_validator(region_code):
-    if isinstance(region_code, int) and region_code > 0:
-        return region_code
-    raise serializers.ValidationError(
-            'Коды регионов должны быть целыми положительными числами')
-
-def region_list_validator(region_list):
-    if isinstance(region_list, list):
-        return [region_code_validator(code) for code in region_list]
-    raise serializers.ValidationError(f'{region_list} не является списком кодов регионов')

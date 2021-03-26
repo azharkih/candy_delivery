@@ -1,23 +1,24 @@
-from dateutil.parser import parse
-from django.db.models import F
 from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from candy_delivery.settings import IS_NEW_REGIONS_AND_TIME_INTERVALS_AVAILABLE
-from delivery import services
-from delivery.models import Courier, InvoiceOrder, Order
+from delivery.models import Courier, Order
 from delivery.serializers import (CourierRelationsSerializer,
                                   CourierSerializer, OrderRelationsSerializer,
-                                  OrderSerializer)
-from delivery.utils import serialize_invoice
+                                  OrderSerializer, serialize_assign_order,
+                                  serialize_complete_order)
+from delivery.utils import response_200_or_400
 
 
 class CourierViewSet(mixins.CreateModelMixin,
                      mixins.RetrieveModelMixin,
                      mixins.UpdateModelMixin,
                      GenericViewSet):
+    """Класс CourierViewSet предназначен для обработки допустимых событий
+    на эндпоинтах couriers/."""
+
     queryset = Courier.objects.all()
     serializer_class = CourierSerializer
 
@@ -47,6 +48,9 @@ class CourierViewSet(mixins.CreateModelMixin,
 
 
 class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
+    """Класс OrderViewSet предназначен для обработки допустимых событий
+    на эндпоинтах orders/."""
+
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
 
@@ -66,34 +70,10 @@ class OrderViewSet(mixins.CreateModelMixin, GenericViewSet):
 
     @action(detail=False, methods=['post'])
     def assign(self, request):
-        try:
-            courier = Courier.objects.get(
-                courier_id=request.data['courier_id'])
-        except:
-            return Response({'error': 'Курьер не найден'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        active_invoice = services.get_active_invoice(courier)
-        context = serialize_invoice(active_invoice)
-        return Response(context, status=status.HTTP_200_OK)
+        context = serialize_assign_order(request.data)
+        return response_200_or_400(context)
 
     @action(detail=False, methods=['post'])
     def complete(self, request):
-        try:
-            invoiceorder = InvoiceOrder.objects.get(
-                order_id=request.data['order_id'],
-                invoice__courier_id=request.data['courier_id'])
-        except:
-            return Response(
-                {'error': 'Заказ не найден или назначен другому курьеру'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        complete_time = request.data.get('complete_time')
-        if not complete_time:
-            return Response(
-                {'error': 'Не передано время доставки'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        complete_time = parse(complete_time)
-        completed_order = services.complete_order(invoiceorder, complete_time)
-        return Response({'order_id': completed_order},
-                        status=status.HTTP_200_OK)
+        context = serialize_complete_order(request.data)
+        return response_200_or_400(context)

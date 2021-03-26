@@ -19,6 +19,10 @@ PAY_COEFFICIENTS = {
 
 
 def knapsack(max_weight, order_weight, num_orders):
+    """Вернуть таблицу возможных комбинаций заказов по весу, ограниченную весом
+     рюкзака.
+    """
+
     memorize = [[0 for _ in range(max_weight + 1)] for _ in
                 range(num_orders + 1)]
     for i in range(num_orders + 1):
@@ -36,13 +40,17 @@ def knapsack(max_weight, order_weight, num_orders):
 
 
 def get_orders_for_delivery(orders, max_weight):
+    """Вернуть список с комбинацией заказов с максимальным весом не превышающим
+    общий максимальный вес.
+    """
+
     knapsack_weight = max_weight * 100
     num_orders = len(orders)
     weights = [int(order.weight * 100) for order in orders]
     memorize = knapsack(knapsack_weight, weights, num_orders)
 
     pack_orders = []
-    w, i, total_weight = knapsack_weight, num_orders, 0
+    w, i = knapsack_weight, num_orders
     result = memorize[num_orders][knapsack_weight]
     while i > 0 and result > 0:
         if result != memorize[i - 1][w]:
@@ -54,10 +62,13 @@ def get_orders_for_delivery(orders, max_weight):
 
 
 def get_available_orders(courier):
-    """ Вернуть запрос на все недоставленные, подходящие курьеру, заказы.
+    """ Вернуть QuerySet со всеми недоставленными, подходящими по критериям
+    курьера, заказами.
 
-    !!! выборка содержит как свои так и чужие заказы, нужен доп. фильтр.
+    Заметки: QuerySet содержит свои, чужие и неназначенные заказы, нужен доп.
+    фильтр.
     """
+
     working_hours = courier.working_hours.values('begin', 'end')
     working_hours_limit = Q()
     for interval in working_hours:
@@ -78,12 +89,14 @@ def get_available_orders(courier):
 
 def get_active_invoice_orders(courier):
     """ Вернуть все назначенные курьеру, но недоставленные заказы."""
+
     return InvoiceOrder.objects.filter(invoice__courier=courier,
                                        complete_time__isnull=True)
 
 
 def get_assign_not_available_orders(courier):
-    """Вернуть заказы которые курьер не сможет доставить."""
+    """Вернуть назначенные курьеру заказы которые он не сможет доставить."""
+
     # Получим доступные на текущий момент недоставленные заказы курьера
     invoice_orders = get_active_invoice_orders(courier)
     orders = get_available_orders(courier).filter(
@@ -102,6 +115,8 @@ def get_assign_not_available_orders(courier):
 
 
 def delete_unavailable_orders(courier):
+    """Исключить из развоза заказы, которые он не сможет доставить."""
+
     unavailable_orders = get_assign_not_available_orders(courier)
     if unavailable_orders:
         unavailable_orders.delete()
@@ -111,6 +126,7 @@ def assign_orders(courier):
     """Назначить подходящие заказы курьеру с максимально возможным весом не
     превышающим его грузоподьемность.
     """
+
     available_orders = get_available_orders(courier).filter(
         invoices__isnull=True)
     if not available_orders:
@@ -130,6 +146,7 @@ def get_active_invoice(courier):
 
     Заметки: возврат неисполненных заказов обеспечивает идемпотентность вызова.
     """
+
     active_invoice = Invoice.objects.filter(
         courier=courier, invoice_orders__complete_time__isnull=True)
     if active_invoice:
@@ -139,6 +156,7 @@ def get_active_invoice(courier):
 
 def complete_order(invoice_order, complete_time):
     """Проставить время завершения, если заказ активный и вернуть id заказа."""
+
     if not invoice_order.complete_time:
         last_delivery_time = InvoiceOrder.objects.filter(
             invoice_id=invoice_order.invoice_id
@@ -154,25 +172,29 @@ def complete_order(invoice_order, complete_time):
 
 
 def get_courier_rating(courier):
+    """Вычислить и вернуть текущий рейтинг курьера."""
+
     is_complete_deliveries = Courier.objects.filter(
         invoices__invoice_orders__complete_time__isnull=False).exists()
     if not is_complete_deliveries:
         return None
     min_average_duration = (
         Order.objects
-        .filter(invoice_orders__delivery_time__isnull=False,
-                invoices__courier=courier)
-        .values('region_id')
-        .annotate(td=Avg('invoice_orders__delivery_time'))
-        .aggregate(time=Min('td')))['time']
+             .filter(invoice_orders__delivery_time__isnull=False,
+                     invoices__courier=courier)
+             .values('region_id')
+             .annotate(td=Avg('invoice_orders__delivery_time'))
+             .aggregate(time=Min('td')))['time']
     return round((3600 - min(min_average_duration, 3600)) / 3600 * 5, 2)
 
 
 def get_courier_earning(courier):
+    """Вычислить и вернуть текущий заработок курьера."""
+
     return (
         Invoice.objects
-        .filter(courier=courier)
-        .exclude(invoice_orders__complete_time__isnull=True)
-        .distinct()
-        .aggregate(sum=Coalesce(Sum('expected_reward'), 0))['sum']
+               .filter(courier=courier)
+               .exclude(invoice_orders__complete_time__isnull=True)
+               .distinct()
+               .aggregate(sum=Coalesce(Sum('expected_reward'), 0))['sum']
     )

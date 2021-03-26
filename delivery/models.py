@@ -5,6 +5,16 @@ from delivery.validators import interval_validator, weight_validator
 
 
 class Region(models.Model):
+    """Класс Region используется для описания модели районов доставки.
+
+    Родительский класс -- models.Model.
+
+    Атрибуты класса
+    --------
+                                            PK <-- Order, Courier
+    code : models.PositiveIntegerField()
+        числовой код района.
+    """
     code = models.PositiveIntegerField(
         primary_key=True,
         verbose_name='Код района',
@@ -12,6 +22,26 @@ class Region(models.Model):
 
 
 class TimeInterval(models.Model):
+    """Класс TimeInterval используется для описания модели интервалов времени.
+
+    Родительский класс -- models.Model.
+
+    Атрибуты класса
+    --------
+                                            PK <-- Order, Courier
+    name : models.CharField()
+        Имя интервала в формате 'HH:MM-HH:MM'
+    begin : models.PositiveIntegerField()
+        Начало интервала в минутах от 00:00
+    end : models.PositiveIntegerField()
+        Конец интервала в минутах от 00:00.
+
+    Методы класса
+    --------
+    __str__() -- возвращает строковое представление модели.
+    save() -- вычисляет значения полей begin и end и сохраняет все изменения в
+        БД.
+    """
     name = models.CharField(
         primary_key=True,
         verbose_name='Интервал(HH:MM-HH:MM)',
@@ -25,16 +55,40 @@ class TimeInterval(models.Model):
         verbose_name='Конец интервала в минутах'
     )
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Вернуть строковое представление в виде имени интервала."""
+
         return self.name
 
-    def save(self, *args, **kwargs):
+    def save(self, *args, **kwargs) -> None:
+        """Вычислить значения полей begin и end и сохранить все изменения в БД.
+        """
+
         self.begin, self.end = interval_validator(self.name)
         super().save(*args, **kwargs)
 
 
 class Courier(models.Model):
-    """Класс для описания модели..."""
+    """Класс Courier используется для описания модели курьера.
+
+    Родительский класс -- models.Model.
+
+    Атрибуты класса
+    --------
+                                                 PK <-- Invoice
+    courier_id : models.PositiveIntegerField()
+        идентификатор курьера
+    courier_type : models.CharField()
+        тип курьера
+    regions : models.ManyToManyField()          FK --> Region
+        регионы в которых работает курьер
+    working_hours = models.ManyToManyField()    FK --> TimeInterval
+        интервалы времени в которых работает курьер
+
+    Методы класса
+    --------
+    __str__() -- возвращает строковое представление модели.
+    """
 
     class CourierType(models.TextChoices):
         """Класс CourierType используется для определения допустимых
@@ -69,11 +123,32 @@ class Courier(models.Model):
     )
 
     def __str__(self) -> str:
+        """Вернуть строковое представление в виде типа и идентификатора
+        курьера."""
         return f'{self.courier_type} - {self.courier_id}'
 
 
 class Order(models.Model):
-    """    """
+    """Класс Order используется для описания модели заказа.
+
+    Родительский класс -- models.Model.
+
+    Атрибуты класса
+    --------
+                                                PK <-- InvoiceOrder
+    order_id : models.PositiveIntegerField()
+        идентификатор заказа
+    weight : models.DecimalField()
+        вес заказа
+    region : models.ForeignKey()                FK --> Region
+        регион доставки заказа
+    delivery_hours = models.ManyToManyField()   FK --> TimeInterval
+        интервалы времени в которые удобно принять заказ.
+
+    Методы класса
+    --------
+    __str__() -- возвращает строковое представление модели.
+    """
     order_id = models.PositiveIntegerField(
         primary_key=True,
         verbose_name='Идентификатор заказа',
@@ -97,12 +172,28 @@ class Order(models.Model):
         db_index=True,
     )
 
-
     def __str__(self) -> str:
+        """Вернуть строковое представление в виде идентификатора заказа."""
         return f'order_id: {self.order_id}'
 
 
 class Invoice(models.Model):
+    """Класс Invoice используется для описания модели задания на развоз.
+
+    Родительский класс -- models.Model.
+
+    Атрибуты класса
+    --------
+                                            PK <-- InvoiceOrder
+    courier : models.ForeignKey()           FK --> Courier
+        курьер назначенный на развоз
+    assign_time : models.DateTimeField()
+        время формирования развоза
+    orders : models.ManyToManyField()       FK --> Order
+        заказы включенные в развоз
+    expected_reward = models.PositiveIntegerField()
+        ожидаемая вознаграждение курьеру за развоз.
+    """
     courier = models.ForeignKey(
         Courier,
         related_name='invoices',
@@ -128,6 +219,21 @@ class Invoice(models.Model):
 
 
 class InvoiceOrder(models.Model):
+    """Класс InvoiceOrder используется для описания модели детализации развоза.
+
+    Родительский класс -- models.Model.
+
+    Атрибуты класса
+    --------
+    invoice : models.ForeignKey()           FK --> Invoice
+        идентификатор развоза
+    order : models.ForeignKey()             FK --> Order
+        заказ
+    complete_time : models.DateTimeField()
+        время завершения заказа
+    delivery_time : models.PositiveIntegerField()
+        время доставки заказа в секундах.
+    """
     invoice = models.ForeignKey(
         Invoice,
         related_name='invoice_orders',
@@ -146,5 +252,3 @@ class InvoiceOrder(models.Model):
         null=True,
         verbose_name='Время доставки в секундах',
     )
-
-

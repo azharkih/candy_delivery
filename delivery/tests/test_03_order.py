@@ -14,12 +14,25 @@ from delivery.tests.test_fixtures import create_test_case_full
 
 
 class OrdersTests(APITestCase):
+    """Класс OrdersTests предназначен для теста обработчиков на эндпоинтах
+    связанных с заказами."""
+
     @classmethod
     def setUpClass(cls):
+        """Произвести настройки перед проведением всех тестов."""
+
         super().setUpClass()
         create_test_case_full()
 
     def test_valid_data_create_orders(self):
+        """Проверить обработку запроса POST /orders с валидными данными.
+
+        Проверки:
+        __________
+        * При валидной структуре json на входе получаем статус ответа 201
+        * На выходе получаем json c корректной структурой
+        * Проверка, что все данные запроса сохраняются в базе
+        """
         url = reverse('orders-list')
         data = {
             'data': [{'order_id': 1, 'weight': 0.20, 'region': 12,
@@ -35,21 +48,24 @@ class OrdersTests(APITestCase):
         # Проверяем корректность ответа
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         created_list = [{'id': x['order_id']} for x in data['data']]
-        self.assertListEqual(response.data.get('orders'), created_list,
-                             'Проверьте что ответ содержит корректный список '
-                             'созданных заказов')
+        self.assertListEqual(
+            response.data.get('orders'), created_list,
+            'Проверьте что ответ содержит корректный список созданных заказов')
         # Проверяем данные в базе
         equal_data = data['data'][0]
         new_order = Order.objects.get(order_id=equal_data['order_id'])
-        self.assertEqual(Order.objects.count(), count_orders + 3,
-                         'Проверьте что все записи заказов пишутся в базу')
-        self.assertTrue(new_order, 'Проверьте что переданный идентификатор '
-                                   'заказа пишется в базу')
-        self.assertEqual(float(new_order.weight), equal_data['weight'],
-                         'Проверьте что вес заказа корректно пишется в базу')
-        self.assertEqual(new_order.region.code, equal_data['region'],
-                         'Проверьте что переданный регион корректно '
-                         'пишется в базу')
+        self.assertEqual(
+            Order.objects.count(), count_orders + 3,
+            'Проверьте что все записи заказов пишутся в базу')
+        self.assertTrue(
+            new_order,
+            'Проверьте что переданный идентификатор заказа пишется в базу')
+        self.assertEqual(
+            float(new_order.weight), equal_data['weight'],
+            'Проверьте что вес заказа корректно пишется в базу')
+        self.assertEqual(
+            new_order.region.code, equal_data['region'],
+            'Проверьте что переданный регион корректно пишется в базу')
         self.assertListEqual(
             list(new_order.delivery_hours.values()),
             list(TimeInterval.objects.filter(
@@ -57,6 +73,17 @@ class OrdersTests(APITestCase):
             'Проверьте что переданные интервалы корректно пишутся в базу')
 
     def test_not_valid_data_create_orders(self):
+        """Проверить обработку запроса POST /orders с невалидными данными.
+
+        Проверки:
+        __________
+        * При невалидной структуре json на входе получаем статус ответа 400
+        * На выходе получаем json c корректной структурой
+        * Есть проверка на обязательные поля
+        * При получении неописанного поля -- возвращается ошибка
+        * Валидация входных данных
+        * При запросе с невалидными данными в базу ничего не пишется.
+        """
         url = reverse('orders-list')
         count_orders = Order.objects.count()
 
@@ -105,9 +132,10 @@ class OrdersTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         unknown_fields = json.loads(response.content)[
             'validation errors']['orders'][0]['errors']['unknown_fields']
-        self.assertTrue('undescribed_field' in unknown_fields,
-                        'Проверьте, что при наличии в запросе неописанных '
-                        'полей возвращается ошибка валидации')
+        self.assertTrue(
+            'undescribed_field' in unknown_fields,
+            'Проверьте, что при наличии в запросе неописанных полей '
+            'возвращается ошибка валидации')
 
         # Проверяем что при  невалидных значений в полях - возвращается ошибка
         wrong_data = {
@@ -178,11 +206,25 @@ class OrdersTests(APITestCase):
             'Проверьте, что строковые значения времени валидны')
 
         # Проверяем, что ни валидная, ни невалидная не записались в базу
-        self.assertEqual(Order.objects.count(), count_orders,
-                         'Проверьте что при наличии невалидных данных в базе '
-                         'не создаются записи')
+        self.assertEqual(
+            Order.objects.count(), count_orders,
+            'Проверьте что при наличии невалидных данных в базе не создаются '
+            'записи')
 
     def test_valid_data_assign_orders(self):
+        """Проверить обработку запроса POST /orders/assign с валидными данными.
+
+        Проверки:
+        __________
+        * При валидной структуре json на входе получаем статус ответа 200
+        * Корректность структуры ответа, для курьера с активным развозом, с
+          завершенным развозом с доступными заказами и их отсутствием
+        * Проверяем, что заказы назначены c максимально возможной комбинацией
+          весов и не превышают грузоподъемность курьера.
+        * Обработчик идемпотентен
+        * Доставленные заказы текущего развоза исключаются, а время остается
+          тоже.
+        """
         url = reverse('orders-assign')
         courier_100 = Courier.objects.get(courier_id=100)
         courier_101 = Courier.objects.get(courier_id=101)
@@ -241,25 +283,31 @@ class OrdersTests(APITestCase):
             sum=Sum('weight'))['sum'])
         courier_103_sum_orders = courier_103_orders.aggregate(
             sum=Sum('weight'))['sum']
-        self.assertEqual(courier_100_sum_orders, 14.18,
-                         'Проверьте, что заказы назначаются корректно')
-        self.assertEqual(courier_101_sum_orders, 11,
-                         'Проверьте, что заказы назначаются корректно')
-        self.assertEqual(courier_102_sum_orders, 45.5,
-                         'Проверьте, что заказы назначаются корректно')
-        self.assertEqual(courier_103_sum_orders, None,
-                         'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(
+            courier_100_sum_orders, 14.18,
+            'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(
+            courier_101_sum_orders, 11,
+            'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(
+            courier_102_sum_orders, 45.5,
+            'Проверьте, что заказы назначаются корректно')
+        self.assertEqual(
+            courier_103_sum_orders, None,
+            'Проверьте, что заказы назначаются корректно')
 
         # Проверяем идемпотентность.
         data = {'courier_id': 100}
         response = self.client.post(url, data, format='json')
-        self.assertEqual(content_100, json.loads(response.content),
-                         'Проверьте, что обработчик идемпотентен.')
+        self.assertEqual(
+            content_100, json.loads(response.content),
+            'Проверьте, что обработчик идемпотентен')
 
         # Проверяем, что другому курьеру не назначены заказы первого.
-        self.assertFalse(courier_101_orders in courier_100_orders,
-                         'Проверьте, что заказы выданные первому курьеру не '
-                         'назначены второму')
+        self.assertFalse(
+            courier_101_orders in courier_100_orders,
+            'Проверьте, что заказы выданные первому курьеру не назначены '
+            'второму')
 
         # Проверяем, что доставленные заказы текущего развоза исключаются,
         # а время остается тоже.
@@ -280,6 +328,13 @@ class OrdersTests(APITestCase):
             ' неизменно.')
 
     def test_not_valid_data_assign_orders(self):
+        """Проверить обработку запроса POST /orders/assign с невалидными
+        данными.
+
+        Проверки:
+        __________
+        * При невалидной структуре json на входе получаем статус ответа 400
+        """
         url = reverse('orders-assign')
         wrong_data = {'courier_id': 999}
         response = self.client.post(url, wrong_data, format='json')
@@ -288,6 +343,17 @@ class OrdersTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_valid_data_complete_order(self):
+        """Проверить обработку запроса POST /orders/complete с валидными
+        данными.
+
+        Проверки:
+        __________
+        * При валидной структуре json на входе получаем статус ответа 200
+        * Корректность структуры ответа
+        * Обработчик идемпотентен
+        * Время завершения заказа устанавливется верно и корректно считается
+          время доставки.
+        """
         url = reverse('orders-complete')
         courier = Courier.objects.first()
         get_active_invoice(courier)
@@ -342,6 +408,15 @@ class OrdersTests(APITestCase):
             ' корректно.')
 
     def test_not_valid_data_complete_order(self):
+        """Проверить обработку запроса POST /orders/complete с невалидными
+        данными.
+
+        Проверки:
+        __________
+        * Если заказ не найден возвращается ошибка 400
+        * Если заказ назначен на другого курьера возвращается ошибка 400
+        * Если заказ не назначен возвращается ошибка 400
+        """
         url = reverse('orders-complete')
         courier_1 = Courier.objects.first()
         courier_2 = Courier.objects.last()

@@ -7,21 +7,32 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from delivery.models import Courier, Invoice, InvoiceOrder, Order, Region, \
-    TimeInterval
-from delivery.services import COURIER_LOAD_CAPACITY, PAY_COEFFICIENTS, \
-    assign_orders, \
-    complete_order
+from delivery.models import Courier, InvoiceOrder, Order, Region, TimeInterval
+from delivery.services import (COURIER_LOAD_CAPACITY, PAY_COEFFICIENTS,
+                               assign_orders, complete_order)
 from delivery.tests.test_fixtures import create_test_case_full
 
 
 class CourierTests(APITestCase):
+    """Класс CourierTests предназначен для теста обработчиков на эндпоинтах
+    связанных с данными о курьерах."""
+
     @classmethod
     def setUpClass(cls):
+        """Произвести настройки перед проведением всех тестов."""
+
         super().setUpClass()
         create_test_case_full()
 
     def test_valid_data_create_couriers(self):
+        """Проверить обработку запроса POST /couriers с валидными данными.
+
+        Проверки:
+        __________
+        * При валидной структуре json на входе получаем статус ответа 201
+        * На выходе получаем json c корректной структурой
+        * Проверка, что все данные запроса сохраняются в базе
+        """
         url = reverse('couriers-list')
         data = {
             'data': [
@@ -47,12 +58,15 @@ class CourierTests(APITestCase):
         # Проверяем данные в базе
         equal_data = data['data'][0]
         new_courier = Courier.objects.get(courier_id=equal_data['courier_id'])
-        self.assertEqual(Courier.objects.count(), count_couriers + 3,
-                         'Проверьте что все записи курьеров пишутся в базу')
-        self.assertTrue(new_courier, 'Проверьте что переданный идентификатор '
-                                     'курьера пишется в базу')
-        self.assertEqual(new_courier.courier_type, equal_data['courier_type'],
-                         'Проверьте что тип курьера корректно пишется в базу')
+        self.assertEqual(
+            Courier.objects.count(), count_couriers + 3,
+            'Проверьте что все записи курьеров пишутся в базу')
+        self.assertTrue(
+            new_courier,
+            'Проверьте что переданный идентификатор курьера пишется в базу')
+        self.assertEqual(
+            new_courier.courier_type, equal_data['courier_type'],
+            'Проверьте что тип курьера корректно пишется в базу')
         self.assertListEqual(
             list(new_courier.regions.values()),
             list(Region.objects.filter(
@@ -65,6 +79,17 @@ class CourierTests(APITestCase):
             'Проверьте что переданные интервалы корректно пишутся в базу')
 
     def test_not_valid_data_create_couriers(self):
+        """Проверить обработку запроса POST /couriers с невалидными данными.
+
+        Проверки:
+        __________
+        * При невалидной структуре json на входе получаем статус ответа 400
+        * На выходе получаем json c корректной структурой
+        * Есть проверка на обязательные поля
+        * При получении неописанного поля -- возвращается ошибка
+        * Валидация входных данных
+        * При запросе с невалидными данными в базу ничего не пишется.
+        """
         url = reverse('couriers-list')
         count_couriers = Courier.objects.count()
         wrong_data = {
@@ -110,9 +135,10 @@ class CourierTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         unknown_fields = json.loads(response.content)[
             'validation errors']['couriers'][0]['errors']['unknown_fields']
-        self.assertTrue('undescribed_field' in unknown_fields,
-                        'Проверьте, что при наличии в запросе неописанных '
-                        'полей возвращается ошибка валидации')
+        self.assertTrue(
+            'undescribed_field' in unknown_fields,
+            'Проверьте, что при наличии в запросе неописанных полей '
+            'возвращается ошибка валидации')
 
         # Проверяем что при  невалидных значений в полях - возвращается ошибка
         wrong_data = {
@@ -172,20 +198,33 @@ class CourierTests(APITestCase):
             in errors['working_hours'],
             'Проверьте, что проверяется что интервалы имеют соответствующую '
             'структуру')
-        self.assertTrue('Expected a list of items but got type "str".'
-                        in errors_2['working_hours'],
-                        'Проверьте, что проверяется передача значения в списке')
+        self.assertTrue(
+            'Expected a list of items but got type "str".'
+            in errors_2['working_hours'],
+            'Проверьте, что проверяется передача значения в списке')
         self.assertTrue(
             'Invalid pk "11:61-14:05" - object does not exist.'
             in errors_3['working_hours'],
             'Проверьте, что строковые значения времени валидны')
 
         # Проверяем, что ни валидная, ни невалидная не записались в базу
-        self.assertEqual(Courier.objects.count(), count_couriers,
-                         'Проверьте что при наличии невалидных данных в базе '
-                         'не создаются записи')
+        self.assertEqual(
+            Courier.objects.count(), count_couriers,
+            'Проверьте что при наличии невалидных данных в базе '
+            'не создаются записи')
 
     def test_valid_data_patch_couriers(self):
+        """Проверить обработку запроса PATCH /couriers с валидными данными.
+
+        Проверки:
+        __________
+        * При валидной структуре json на входе получаем статус ответа 200
+        * Доступны для редактирования поля courier_type, regions, working_hours
+          в любой комбинации.
+        * На выходе получаем json c корректной структурой
+        * Все данные запроса сохраняются в базе
+        * После изменения курьера снялись заказы которые он не может доставить
+        """
         courier = Courier.objects.get(courier_id=100)
         assign_orders(courier)
         new_working_hours = ['11:35-14:05', '06:00-06:30']
@@ -214,8 +253,9 @@ class CourierTests(APITestCase):
         patched_courier = Courier.objects.get(courier_id=courier.courier_id)
 
         # Проверим что все изменения попали в базу
-        self.assertEqual(patched_courier.courier_type, new_type,
-                         'Проверьте, что при patch запросе меняется тип курьера')
+        self.assertEqual(
+            patched_courier.courier_type, new_type,
+            'Проверьте, что при patch запросе меняется тип курьера')
         self.assertListEqual(
             list(patched_courier.regions.values()),
             list(Region.objects.filter(
@@ -243,14 +283,23 @@ class CourierTests(APITestCase):
         excess_orders = patched_courier_orders.exclude(
             region__in=patched_courier.regions.all()).exclude(
             delivery_hours__in=patched_courier.working_hours.all())
-        self.assertFalse(excess_orders.exists(),
-                         'Проверьте, что при patch запросе c изменением регионов и времен '
-                         'снимаются заказы которые курьер не сможет доставить')
+        self.assertFalse(
+            excess_orders.exists(),
+            'Проверьте, что при patch запросе c изменением регионов и времен '
+            'снимаются заказы которые курьер не сможет доставить')
 
     def test_not_valid_data_patch_courier(self):
+        """Проверить обработку запроса PATCH /couriers с невалидными данными.
+
+        Проверки:
+        __________
+        * Поле courier_id заблокировано от изменений
+        * При получении неописанного поля -- возвращается ошибка
+        * Валидация входных данных.
+        """
         courier = Courier.objects.first()
         url = reverse('couriers-detail', kwargs={'pk': courier.courier_id})
-        # Проверка доступности изменения каждого поля в отдельности.
+        # Проверка, что поле courier_id заблокировано от изменений
         wrong_data = {'courier_id': 11}
         response = self.client.patch(url, wrong_data, format='json')
         self.assertEqual(
@@ -263,9 +312,10 @@ class CourierTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         unknown_fields = json.loads(response.content)[
             'validation errors'].get('unknown_fields')
-        self.assertTrue('undescribed_field' in unknown_fields,
-                        'Проверьте, что при наличии в запросе неописанных '
-                        'полей возвращается ошибка валидации')
+        self.assertTrue(
+            'undescribed_field' in unknown_fields,
+            'Проверьте, что при наличии в запросе неописанных полей '
+            'возвращается ошибка валидации')
 
         # Проверяем что при  невалидных значений в полях - возвращается ошибка
         wrong_data = {'courier_type': 'foo', 'regions': ['Moscow'],
@@ -288,6 +338,20 @@ class CourierTests(APITestCase):
             'структуру')
 
     def test_get_courier(self):
+        """Проверить обработку запроса GET /courier/$courier_id.
+
+        Проверки:
+        __________
+        * При отправке запроса на эндпоинт с id существующего курьера получаем
+        ответ со статусом 200.
+        * Структура ответа для курьера не совершившего ни одной доставки
+        * Структура ответа для курьера с завершенными доставками
+        * Корректность расчета рейтинга
+        * Корректность расчета заработка
+        * Корректность расчета заработка при смене типа курьера в середине
+        развоза.
+        """
+
         courier = Courier.objects.get(courier_id=100)
         url = reverse('couriers-detail', kwargs={'pk': courier.courier_id})
 
@@ -344,16 +408,16 @@ class CourierTests(APITestCase):
             response = self.client.get(url)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             content = json.loads(response.content)
-            self.assertEqual(content['rating'], rating,
-                             'Рейтинг считается неверно')
+            self.assertEqual(
+                content['rating'], rating,
+                'Рейтинг считается неверно')
             count_orders -= 1
             if count_orders == 0:
-                self.assertEqual(content['earnings'], earning,
-                                 'Заработок считается неверно')
+                self.assertEqual(
+                    content['earnings'], earning,
+                    'Заработок считается неверно')
             else:
                 self.assertEqual(
                     content['earnings'], 0,
                     'Заработок должен прибавляться только по завершенным '
                     'развозам')
-
-
